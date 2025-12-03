@@ -36,36 +36,58 @@ char get_block(const World &w, int x,int y){ if(!in_bounds(x,y)) return (char)BE
 void set_block(World &w,int x,int y,char b){ if(in_bounds(x,y)) w[y][x]=b; }
 
 void init_world(World &world) {
+    // Procedural: generar altura de superficie por columna y cavidades/túneles
     world.assign(H, std::string(W, (char)AIR));
-    int ground = H - 5;
-    for (int y = ground; y < H-1; ++y) {
-        for (int x = 0; x < W; ++x) {
-            if (y == ground) world[y][x] = (char)GRASS;
+    std::srand((unsigned)time(nullptr));
+    std::vector<int> height(W);
+    for (int x = 0; x < W; ++x) {
+        float t = (float)x / (float)W * 6.2831853f; // 2*pi
+        float base = (std::sin(t * 0.7f) + 1.0f) * 0.5f; // 0..1
+        int h = (int)((H / 3) + base * (H / 6)) + (std::rand() % 3 - 1);
+        h = std::max(2, std::min(H-6, h));
+        height[x] = h;
+    }
+
+    // rellenar suelo según heights
+    for (int x = 0; x < W; ++x) {
+        int g = height[x];
+        for (int y = g; y < H-1; ++y) {
+            if (y == g) world[y][x] = (char)GRASS;
             else if (y < H-2) world[y][x] = (char)DIRT;
             else world[y][x] = (char)STONE;
         }
     }
+    // bedrock
     for (int x = 0; x < W; ++x) world[H-1][x] = (char)BEDR;
 
-    // Árboles simples dispersos
-    for (int t = 2; t < W-2; t+=8) {
-        int tx = t; int ty = ground-1;
-        if (ty-2 >= 0 && tx>0 && tx<W) {
-            world[ty][tx] = (char)WOOD;
-            world[ty-1][tx] = (char)WOOD;
-            world[ty-2][tx] = (char)WOOD;
+    // árboles sencillos
+    for (int x = 2; x < W-2; x += 6) {
+        int t = height[x] - 1;
+        if (t - 2 >= 0) {
+            world[t][x] = (char)WOOD;
+            world[t-1][x] = (char)WOOD;
         }
     }
 
-    // Cueva simple: abrir túnel horizontal bajo la superficie
-    int caveY = ground + 2;
-    for (int x = 10; x < 30; ++x) {
-        if (caveY < H-1) world[caveY][x] = (char)AIR;
-        if (caveY+1 < H-1 && (x%5==0)) world[caveY+1][x] = (char)AIR; // ampliaciones
+    // Crear varias cuevas/túneles por random walk
+    int tunnels = 4 + (std::rand() % 3);
+    for (int i = 0; i < tunnels; ++i) {
+        int tx = W/4 + (std::rand() % (W/2));
+        int ty = height[tx] + 3 + (std::rand() % 4);
+        int len = 30 + (std::rand() % 60);
+        for (int s = 0; s < len; ++s) {
+            // carve a small room
+            for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+                int xx = tx + dx; int yy = ty + dy;
+                if (in_bounds(xx, yy) && yy < H-1) world[yy][xx] = (char)AIR;
+            }
+            // random walk
+            tx += (std::rand() % 3) - 1;
+            ty += (std::rand() % 3) - 1;
+            if (tx < 1) tx = 1; if (tx > W-2) tx = W-2;
+            if (ty < 2) ty = 2; if (ty > H-3) ty = H-3;
+        }
     }
-    // entrada a la cueva
-    world[ground+1][10] = (char)AIR;
-    world[ground+2][10] = (char)AIR;
 }
 
 // Helpers para detección de colisiones AABB -> tiles
@@ -131,7 +153,14 @@ int main(){
 
     Player p{};
     p.w = TILE-6; p.h = TILE-6;
-    p.px = (W/2) * TILE; p.py = (H-6) * TILE; p.vx = 0; p.vy = 0; p.fx = 1; p.fy = 0; p.selected = (char)GRASS;
+    p.px = (W/2) * TILE; p.vx = 0; p.vy = 0; p.fx = 1; p.fy = 0; p.selected = (char)GRASS;
+    // spawn player above surface at middle column
+    int spawnTileY = 0;
+    for (int y = 0; y < H; ++y) {
+        if (get_block(world, W/2, y) != (char)AIR) { spawnTileY = y - 1; break; }
+    }
+    if (spawnTileY < 0) spawnTileY = H - 6;
+    p.py = spawnTileY * TILE;
     p.inv[(char)GRASS]=10; p.inv[(char)DIRT]=8; p.inv[(char)STONE]=6; p.inv[(char)WOOD]=3; p.inv[(char)BEDR]=0;
 
     sf::RenderWindow window(sf::VideoMode(W*TILE, H*TILE + 80), "Minecraft2D - SFML (Fisicas)");
