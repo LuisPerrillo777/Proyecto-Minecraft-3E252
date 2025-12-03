@@ -27,3 +27,7 @@ clean:
 
 .PHONY: all clean
 .PHONY: run-%
+
+# Objetivo explícito para el ejemplo 09_Minecraft2D (ayuda a usar `make run09_Minecraft2D` en entornos Windows)
+run09_Minecraft2D: $(BIN_DIR)/09_Minecraft2D.exe
+	./$(BIN_DIR)/09_Minecraft2D.exe
