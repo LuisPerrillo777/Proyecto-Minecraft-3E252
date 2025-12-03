@@ -163,8 +163,13 @@ int main(){
     p.py = spawnTileY * TILE;
     p.inv[(char)GRASS]=10; p.inv[(char)DIRT]=8; p.inv[(char)STONE]=6; p.inv[(char)WOOD]=3; p.inv[(char)BEDR]=0;
 
-    sf::RenderWindow window(sf::VideoMode(W*TILE, H*TILE + 80), "Minecraft2D - SFML (Fisicas)");
+    // Ventana más pequeña: mostramos solo una porción del mapa y usamos una cámara que sigue al jugador
+    const int VIEW_W_TILES = 20;
+    const int VIEW_H_TILES = 12;
+    const int HUD_HEIGHT = 80;
+    sf::RenderWindow window(sf::VideoMode(VIEW_W_TILES * TILE, VIEW_H_TILES * TILE + HUD_HEIGHT), "Minecraft2D - SFML (Fisicas)");
     window.setFramerateLimit(60);
+    sf::View camera(sf::FloatRect(0.f, 0.f, (float)VIEW_W_TILES * TILE, (float)VIEW_H_TILES * TILE));
 
     std::map<char, sf::Color> color {
         {(char)AIR, sf::Color(135,206,235)},
@@ -235,7 +240,9 @@ int main(){
             if (ev.type == sf::Event::MouseButtonPressed){
                 // click handling: colocar con botón derecho (inmediato). Picar con botón izquierdo ahora se maneja manteniendo pulsado (ver loop principal).
                 sf::Vector2i m = sf::Mouse::getPosition(window);
-                int mx = m.x / TILE; int my = m.y / TILE;
+                // mapear la posición del ratón a coordenadas del mundo según la cámara
+                sf::Vector2f worldPos = window.mapPixelToCoords(m, camera);
+                int mx = static_cast<int>(std::floor(worldPos.x)) / TILE; int my = static_cast<int>(std::floor(worldPos.y)) / TILE;
                 if (ev.mouseButton.button == sf::Mouse::Right){
                     if (in_bounds(mx,my)){
                         char b = p.selected;
@@ -280,7 +287,8 @@ int main(){
             targetY = (centerY + p.fy * TILE) / TILE;
         } else if (mouseBreak) {
             sf::Vector2i mpos = sf::Mouse::getPosition(window);
-            targetX = mpos.x / TILE; targetY = mpos.y / TILE;
+            sf::Vector2f wp = window.mapPixelToCoords(mpos, camera);
+            targetX = static_cast<int>(std::floor(wp.x)) / TILE; targetY = static_cast<int>(std::floor(wp.y)) / TILE;
         }
 
         if (targetX != -1 && in_bounds(targetX, targetY)) {
@@ -318,7 +326,19 @@ int main(){
 
         window.clear(sf::Color(135,206,235));
 
-        // draw world
+        // actualizar cámara centrada en el jugador pero limitada al mapa
+        float halfW = (float)VIEW_W_TILES * TILE * 0.5f;
+        float halfH = (float)VIEW_H_TILES * TILE * 0.5f;
+        float mapPixelW = (float)W * TILE;
+        float mapPixelH = (float)H * TILE;
+        float desiredX = p.px + p.w*0.5f;
+        float desiredY = p.py + p.h*0.5f;
+        float camX = std::min(std::max(desiredX, halfW), mapPixelW - halfW);
+        float camY = std::min(std::max(desiredY, halfH), mapPixelH - halfH);
+        camera.setCenter(camX, camY);
+
+        // dibujamos el mundo usando la cámara
+        window.setView(camera);
         for (int y=0;y<H;++y){
             for (int x=0;x<W;++x){
                 char b = get_block(world,x,y);
@@ -329,7 +349,7 @@ int main(){
             }
         }
 
-        // mostrar progreso de picar si aplica
+        // mostrar progreso de picar si aplica (en coordenadas del mundo, con la cámara activa)
         if (breaking && breakX>=0 && breakY>=0) {
             sf::RectangleShape overlay(sf::Vector2f(TILE, TILE));
             overlay.setPosition(breakX * TILE, breakY * TILE);
@@ -355,11 +375,10 @@ int main(){
         playerShape.setPosition(p.px, p.py);
         window.draw(playerShape);
 
-        // (No enemies to draw)
-
-        // HUD
-        sf::RectangleShape hudBg(sf::Vector2f(W*TILE, 80));
-        hudBg.setPosition(0, H*TILE);
+        // HUD: cambiar a vista por defecto para dibujar elementos de interfaz en pantalla
+        window.setView(window.getDefaultView());
+        sf::RectangleShape hudBg(sf::Vector2f((float)VIEW_W_TILES * TILE, (float)HUD_HEIGHT));
+        hudBg.setPosition(0, (float)VIEW_H_TILES * TILE);
         hudBg.setFillColor(sf::Color(30,30,30,200));
         window.draw(hudBg);
 
@@ -368,20 +387,20 @@ int main(){
             char mapSel[5] = {(char)GRASS,(char)DIRT,(char)STONE,(char)WOOD,(char)BEDR};
             char b = mapSel[i];
             sf::RectangleShape slot(sf::Vector2f(48,48));
-            slot.setPosition(10 + i*60, H*TILE + 16);
+            slot.setPosition(10 + i*60, VIEW_H_TILES * TILE + 16);
             slot.setFillColor(color[b]);
             if (b==p.selected) { slot.setOutlineThickness(3); slot.setOutlineColor(sf::Color::Yellow); }
             else { slot.setOutlineThickness(1); slot.setOutlineColor(sf::Color::Black); }
             window.draw(slot);
             sf::Text t(std::to_string(p.inv[b]), font, 16);
             t.setFillColor(sf::Color::White);
-            t.setPosition(10 + i*60 + 28, H*TILE + 48);
+            t.setPosition(10 + i*60 + 28, VIEW_H_TILES * TILE + 48);
             window.draw(t);
         }
 
         sf::Text instr("W/Space: saltar  A/D: mover  X: picar  C: colocar  1-5: seleccionar", font, 14);
         instr.setFillColor(sf::Color::White);
-        instr.setPosition(10, H*TILE + 4);
+        instr.setPosition(10, VIEW_H_TILES * TILE + 4);
         window.draw(instr);
 
         // (No HUD de vida ni manejo de Game Over en esta versión)
