@@ -12,11 +12,12 @@
 // - Física vertical: gravedad, salto, velocidad y colisión con tiles sólidos
 // - Mapa más grande y una cueva/túnel subterráneo
 
-const int W = 40;
-const int H = 20;
+// Map size increased: larger world while window/view remains the same
+const int W = 160;
+const int H = 80;
 const int TILE = 32;
 
-enum Block : char { AIR = ' ', GRASS = 'G', DIRT = 'D', STONE = 'S', WOOD = 'W', BEDR = 'B' };
+enum Block : char { AIR = ' ', GRASS = 'G', DIRT = 'D', STONE = 'S', WOOD = 'W', BEDR = 'B', LEAF = 'L', COAL = 'c', IRON = 'i', GOLD = 'o' };
 
 using World = std::vector<std::string>;
 
@@ -53,39 +54,65 @@ void init_world(World &world) {
         int g = height[x];
         for (int y = g; y < H-1; ++y) {
             if (y == g) world[y][x] = (char)GRASS;
-            else if (y < H-2) world[y][x] = (char)DIRT;
+            else if (y < g + 4) world[y][x] = (char)DIRT;
             else world[y][x] = (char)STONE;
         }
     }
     // bedrock
     for (int x = 0; x < W; ++x) world[H-1][x] = (char)BEDR;
 
-    // árboles sencillos
-    for (int x = 2; x < W-2; x += 6) {
-        int t = height[x] - 1;
-        if (t - 2 >= 0) {
-            world[t][x] = (char)WOOD;
-            world[t-1][x] = (char)WOOD;
+    // árboles: probabilidad por columna, tronco vertical y copa de hojas
+    for (int x = 2; x < W-2; ++x) {
+        if ((std::rand() % 100) < 12) { // ~12% de probabilidad por columna
+            int g = height[x];
+            int trunkH = 2 + (std::rand() % 3); // 2..4
+            for (int t = 1; t <= trunkH; ++t) {
+                int ty = g - t;
+                if (ty >= 0) world[ty][x] = (char)WOOD;
+            }
+            int topY = g - trunkH;
+            // copa: bloque de 5x3 aproximadamente
+            for (int dx = -2; dx <= 2; ++dx) for (int dy = -2; dy <= 0; ++dy) {
+                int xx = x + dx; int yy = topY + dy;
+                if (in_bounds(xx, yy) && world[yy][xx] == (char)AIR) world[yy][xx] = (char)LEAF;
+            }
         }
     }
 
-    // Crear varias cuevas/túneles por random walk
-    int tunnels = 4 + (std::rand() % 3);
+    // Crear cuevas/túneles y cavidades más numerosas por random walk empezando por debajo de la capa de tierra
+    int tunnels = 10 + (std::rand() % 10);
     for (int i = 0; i < tunnels; ++i) {
-        int tx = W/4 + (std::rand() % (W/2));
-        int ty = height[tx] + 3 + (std::rand() % 4);
-        int len = 30 + (std::rand() % 60);
+        int tx = std::max(2, std::min(W-3, W/4 + (std::rand() % (W/2))));
+        int ty = std::min(H-5, height[tx] + 4 + (std::rand() % 6));
+        int len = 40 + (std::rand() % 120);
         for (int s = 0; s < len; ++s) {
-            // carve a small room
-            for (int dy = -1; dy <= 1; ++dy) for (int dx = -1; dx <= 1; ++dx) {
+            // carve a small room radius 1-2
+            int radius = 1 + (std::rand() % 2);
+            for (int dy = -radius; dy <= radius; ++dy) for (int dx = -radius; dx <= radius; ++dx) {
                 int xx = tx + dx; int yy = ty + dy;
                 if (in_bounds(xx, yy) && yy < H-1) world[yy][xx] = (char)AIR;
             }
-            // random walk
+            // random walk biased to remain underground
             tx += (std::rand() % 3) - 1;
-            ty += (std::rand() % 3) - 1;
+            ty += (std::rand() % 5) - 2; // allow more vertical variance
             if (tx < 1) tx = 1; if (tx > W-2) tx = W-2;
             if (ty < 2) ty = 2; if (ty > H-3) ty = H-3;
+        }
+    }
+
+    // Generar vetas de mineral: reemplazar algo de piedra por carbón/hierro/oro según profundidad
+    for (int y = 2; y < H-2; ++y) {
+        for (int x = 1; x < W-1; ++x) {
+            if (world[y][x] == (char)STONE) {
+                int depth = y;
+                int r = std::rand() % 1000;
+                // carbón: más frecuente en capas superiores de roca
+                if (r < 40 && depth < H/2) world[y][x] = (char)COAL; // ~4%
+                // hierro: menos frecuente y más profundo
+                else if (r < 52 && depth >= H/4 && depth < (3*H)/4) world[y][x] = (char)IRON; // ~1.2%
+                // oro: raro, profundo
+                else if (r < 55 && depth > (3*H)/4) world[y][x] = (char)GOLD; // ~0.3%
+            }
         }
     }
 }
@@ -162,6 +189,7 @@ int main(){
     if (spawnTileY < 0) spawnTileY = H - 6;
     p.py = spawnTileY * TILE;
     p.inv[(char)GRASS]=10; p.inv[(char)DIRT]=8; p.inv[(char)STONE]=6; p.inv[(char)WOOD]=3; p.inv[(char)BEDR]=0;
+    p.inv[(char)LEAF]=0; p.inv[(char)COAL]=0; p.inv[(char)IRON]=0; p.inv[(char)GOLD]=0;
 
     // Ventana más pequeña: mostramos solo una porción del mapa y usamos una cámara que sigue al jugador
     const int VIEW_W_TILES = 20;
@@ -177,7 +205,11 @@ int main(){
         {(char)DIRT, sf::Color(134, 96, 67)},
         {(char)STONE, sf::Color(120,120,120)},
         {(char)WOOD, sf::Color(150, 111, 51)},
-        {(char)BEDR, sf::Color(40,40,40)}
+        {(char)BEDR, sf::Color(40,40,40)},
+        {(char)LEAF, sf::Color(110,180,80)},
+        {(char)COAL, sf::Color(30,30,30)},
+        {(char)IRON, sf::Color(180,180,200)},
+        {(char)GOLD, sf::Color(212,175,55)}
     };
 
     sf::Font font;
@@ -217,7 +249,10 @@ int main(){
                 if (ev.key.code == sf::Keyboard::Num2) p.selected=(char)DIRT;
                 if (ev.key.code == sf::Keyboard::Num3) p.selected=(char)STONE;
                 if (ev.key.code == sf::Keyboard::Num4) p.selected=(char)WOOD;
-                if (ev.key.code == sf::Keyboard::Num5) p.selected=(char)BEDR;
+                if (ev.key.code == sf::Keyboard::Num5) p.selected=(char)LEAF;
+                if (ev.key.code == sf::Keyboard::Num6) p.selected=(char)COAL;
+                if (ev.key.code == sf::Keyboard::Num7) p.selected=(char)IRON;
+                if (ev.key.code == sf::Keyboard::Num8) p.selected=(char)GOLD;
                 // tecla X ahora inicia picar (mecánica por tiempo) — manejado en el bucle principal
                 if (ev.key.code == sf::Keyboard::C) {
                     int centerX = static_cast<int>(p.px + p.w/2);
@@ -298,6 +333,10 @@ int main(){
                 float mult = 1.0f;
                 if (tb == (char)STONE) mult = 2.0f;
                 else if (tb == (char)WOOD) mult = 0.8f;
+                else if (tb == (char)LEAF) mult = 0.4f;
+                else if (tb == (char)COAL) mult = 1.2f;
+                else if (tb == (char)IRON) mult = 3.0f;
+                else if (tb == (char)GOLD) mult = 4.0f;
 
                 if (breaking && breakX == targetX && breakY == targetY) {
                     breakProgress += dt;
@@ -358,7 +397,12 @@ int main(){
             // barra de progreso
             char tb = get_block(world, breakX, breakY);
             float mult = 1.0f;
-            if (tb == (char)STONE) mult = 2.0f; else if (tb == (char)WOOD) mult = 0.8f;
+            if (tb == (char)STONE) mult = 2.0f;
+            else if (tb == (char)WOOD) mult = 0.8f;
+            else if (tb == (char)LEAF) mult = 0.4f;
+            else if (tb == (char)COAL) mult = 1.2f;
+            else if (tb == (char)IRON) mult = 3.0f;
+            else if (tb == (char)GOLD) mult = 4.0f;
             float need = BASE_BREAK_TIME * mult;
             float ratio = std::min(1.0f, breakProgress / (need + 1e-6f));
             sf::RectangleShape barBg(sf::Vector2f(TILE-6, 8));
@@ -382,9 +426,9 @@ int main(){
         hudBg.setFillColor(sf::Color(30,30,30,200));
         window.draw(hudBg);
 
-        // inventory
-        for (int i=0;i<5;++i){
-            char mapSel[5] = {(char)GRASS,(char)DIRT,(char)STONE,(char)WOOD,(char)BEDR};
+        // inventory (extendido con hojas y minerales)
+        for (int i=0;i<8;++i){
+            char mapSel[8] = {(char)GRASS,(char)DIRT,(char)STONE,(char)WOOD,(char)LEAF,(char)COAL,(char)IRON,(char)GOLD};
             char b = mapSel[i];
             sf::RectangleShape slot(sf::Vector2f(48,48));
             slot.setPosition(10 + i*60, VIEW_H_TILES * TILE + 16);
@@ -398,7 +442,7 @@ int main(){
             window.draw(t);
         }
 
-        sf::Text instr("W/Space: saltar  A/D: mover  X: picar  C: colocar  1-5: seleccionar", font, 14);
+        sf::Text instr("W/Space: saltar  A/D: mover  X: picar  C: colocar  1-8: seleccionar", font, 14);
         instr.setFillColor(sf::Color::White);
         instr.setPosition(10, VIEW_H_TILES * TILE + 4);
         window.draw(instr);
